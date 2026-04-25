@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  serviceName: {{.Name}}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{.Name}}
+  template:
+    metadata:
+      labels:
+        app: {{.Name}}
+    spec:
+      containers:
+        - name: s3
+          image: s3:7-alpine
+          ports:
+            - containerPort: 6379
+          envFrom:
+            - secretRef:
+                name: {{.Name}}-secret
+          volumeMounts:
+            - name: s3-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: s3-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
