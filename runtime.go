@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"net"
+	"fmt"
+	"net/http"
 	"time"
 
 	basev0 "github.com/codefly-dev/core/generated/go/codefly/base/v0"
@@ -99,7 +100,10 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 	w.Debug("tcp network instance", wool.Field("instance", instance))
 
 	s.Infof("will run on %s", instance.Host)
-	s.s3Port = 6379
+	// 9000 is the MinIO S3 API port. The console (9001) is not
+	// exposed — operators who want the UI can `docker port` it
+	// manually; codefly only manages one TCP endpoint per service.
+	s.s3Port = 9000
 
 	// Create connection string resources for the network instance
 	for _, inst := range net.Instances {
@@ -121,18 +125,26 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 	runner.WithOutput(s.Wool)
 	runner.WithPortMapping(ctx, uint16(instance.Port), s.s3Port)
 
-	// Load password from configuration
+	// Load creds from configuration (defaults to MinIO defaults).
 	err = s.LoadConfiguration(ctx, s.Configuration)
 	if err != nil {
 		return s.Runtime.InitError(err)
 	}
 
-	if s.s3Password != "" {
-		runner.WithEnvironmentVariables(ctx,
-			resources.Env("S3_PASSWORD", s.s3Password),
-		)
-		runner.WithCommand("s3-server", "--requirepass", s.s3Password)
+	// MinIO refuses to start if the root password is shorter than 8
+	// chars. We surface that early with a wool error rather than
+	// letting the container crash-loop with an opaque message.
+	if len(s.rootPassword) < 8 {
+		return s.Runtime.InitError(w.NewError("MINIO_ROOT_PASSWORD must be >= 8 chars"))
 	}
+
+	runner.WithEnvironmentVariables(ctx,
+		resources.Env("MINIO_ROOT_USER", s.rootUser),
+		resources.Env("MINIO_ROOT_PASSWORD", s.rootPassword),
+	)
+	// `server /data` is MinIO's standard single-node command. We omit
+	// --console-address — codefly only exposes the S3 API port.
+	runner.WithCommand("server", "/data")
 
 	s.runnerEnvironment = runner
 
@@ -146,6 +158,12 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 	return s.Runtime.InitResponse()
 }
 
+// minIOReadyURL is MinIO's documented liveness probe — returns 200
+// once the server is accepting traffic, anything else means "not
+// ready yet". Distinct from /minio/health/cluster (cluster-mode probe)
+// which we'd add only if we ever ran multi-node MinIO.
+const minIOReadyURL = "/minio/health/live"
+
 func (s *Runtime) WaitForReady(ctx context.Context) error {
 	defer s.Wool.Catch()
 	ctx = s.Wool.Inject(ctx)
@@ -155,35 +173,33 @@ func (s *Runtime) WaitForReady(ctx context.Context) error {
 		return s.Wool.Wrapf(err, "cannot find network instance")
 	}
 
-	// instance.Host is already host:port form ("localhost:65350"), while
-	// instance.Address is the same string. The previous "%s:%d" with
-	// Host doubled the port and produced "localhost:65350:65350" which
-	// trips net.Dial's "too many colons" error. Use Address directly.
-	address := instance.Address
-	s.Wool.Debug("waiting for s3 to be ready", wool.Field("address", address))
+	probeURL := fmt.Sprintf("http://%s%s", instance.Address, minIOReadyURL)
+	s.Wool.Debug("waiting for minio to be ready", wool.Field("url", probeURL))
 
-	maxRetry := 10
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// MinIO usually accepts traffic 1-3s after the container starts;
+	// 30 attempts × 2s = 60s budget which is generous for a slow
+	// laptop or a fresh image pull on the first run.
+	const maxRetry = 30
+	var lastErr error
 	for retry := 0; retry < maxRetry; retry++ {
-		conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
+		resp, err := client.Do(req)
 		if err == nil {
-			// Send PING command
-			_, err = conn.Write([]byte("*1\r\n$4\r\nPING\r\n"))
-			if err == nil {
-				buf := make([]byte, 64)
-				_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-				n, readErr := conn.Read(buf)
-				conn.Close()
-				if readErr == nil && n > 0 {
-					s.Wool.Debug("s3 is ready!")
-					return nil
-				}
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				s.Wool.Debug("minio is ready", wool.Field("status", resp.StatusCode))
+				return nil
 			}
-			conn.Close()
+			lastErr = fmt.Errorf("status %d", resp.StatusCode)
+		} else {
+			lastErr = err
 		}
-		s.Wool.Debug("waiting for s3 to be ready", wool.ErrField(err))
+		s.Wool.Debug("minio not ready yet", wool.Field("retry", retry), wool.ErrField(lastErr))
 		time.Sleep(2 * time.Second)
 	}
-	return s.Wool.NewError("s3 is not ready")
+	return s.Wool.NewError("minio is not ready: %v", lastErr)
 }
 
 func (s *Runtime) Start(ctx context.Context, req *runtimev0.StartRequest) (*runtimev0.StartResponse, error) {

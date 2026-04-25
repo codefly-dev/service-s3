@@ -25,9 +25,16 @@ var requirements = builders.NewDependencies(agent.Name,
 	builders.NewDependency("service.codefly.yaml"),
 )
 
+// Settings — MinIO root credentials. Both default to "minioadmin"
+// (the upstream MinIO default) so a brand-new dev workspace just
+// works; production deployments override via codefly secret.
+//
+// MinIO refuses to start if root-password is shorter than 8 chars,
+// so the validation lives at start time (Init) rather than here —
+// keeping Settings unmarshal lossless for round-tripping.
 type Settings struct {
-	Password    string `yaml:"password"`
-	RequirePass bool   `yaml:"require-pass"`
+	RootUser     string `yaml:"root-user"`
+	RootPassword string `yaml:"root-password"`
 }
 
 // image — pinned MinIO release. NEVER :latest (project policy):
@@ -46,7 +53,13 @@ type Service struct {
 	// Settings
 	*Settings
 
-	s3Password string
+	// Resolved MinIO root creds — pulled from configuration via
+	// LoadConfiguration. Defaults to MinIO's upstream default
+	// ("minioadmin" / "minioadmin") so dev workspaces work with no
+	// codefly secret wired. Production overrides through the standard
+	// configuration flow.
+	rootUser     string
+	rootPassword string
 
 	TcpEndpoint *basev0.Endpoint
 }
@@ -69,7 +82,11 @@ func (s *Service) GetAgentInformation(ctx context.Context, _ *agentv0.AgentInfor
 			{
 				Name: "s3", Description: "s3 connection details",
 				Fields: []*agentv0.ConfigurationValueInformation{
-					{Name: "connection", Description: "connection string"},
+					{Name: "connection", Description: "s3:// URL form (legacy)"},
+					{Name: "endpoint", Description: "host:port (no scheme)"},
+					{Name: "access_key", Description: "MinIO root user / S3 access key id"},
+					{Name: "secret_key", Description: "MinIO root password / S3 secret"},
+					{Name: "region", Description: "AWS-style region (defaults to us-east-1; MinIO ignores)"},
 				},
 			},
 		},
@@ -84,33 +101,41 @@ func NewService() *Service {
 	}
 }
 
+// minioDefaultUser / minioDefaultPassword — the upstream MinIO
+// defaults. Used when no codefly secret is configured so a fresh dev
+// workspace works on first `codefly run`.
+const (
+	minioDefaultUser     = "minioadmin"
+	minioDefaultPassword = "minioadmin"
+)
+
+// LoadConfiguration pulls MINIO_ROOT_USER + MINIO_ROOT_PASSWORD from
+// the s3 secret group, falling back to the MinIO defaults when no
+// configuration is wired. Production sets these through the standard
+// codefly secret flow.
 func (s *Service) LoadConfiguration(ctx context.Context, conf *basev0.Configuration) error {
-	// Configuration is optional — if no S3_PASSWORD is provided, run
-	// without auth. This is the sensible default for local dev + test
-	// environments; production deployments set the password via the
-	// standard configuration flow.
+	// Defaults first; any successful key read overrides.
+	s.rootUser = minioDefaultUser
+	s.rootPassword = minioDefaultPassword
+
 	if conf == nil {
-		s.s3Password = ""
 		return nil
 	}
-	pw, err := resources.GetConfigurationValue(ctx, conf, "s3", "S3_PASSWORD")
-	if err != nil {
-		// Missing key is fine — empty password means no auth. Only
-		// surface genuine errors (malformed config, etc.) — but
-		// GetConfigurationValue returns an error for "not found" too, so
-		// treat any err as "no password configured".
-		s.s3Password = ""
-		return nil
+
+	if u, err := resources.GetConfigurationValue(ctx, conf, "s3", "MINIO_ROOT_USER"); err == nil && u != "" {
+		s.rootUser = u
 	}
-	s.s3Password = pw
+	if p, err := resources.GetConfigurationValue(ctx, conf, "s3", "MINIO_ROOT_PASSWORD"); err == nil && p != "" {
+		s.rootPassword = p
+	}
 	return nil
 }
 
-func (s *Service) createConnectionString(_ context.Context, address string) string {
-	if s.s3Password != "" {
-		return fmt.Sprintf("s3://:%s@%s", s.s3Password, address)
-	}
-	return fmt.Sprintf("s3://%s", address)
+// connectionURL returns an s3:// URL with the resolved creds. Kept
+// for backward compatibility — consumers should prefer the structured
+// keys (endpoint / access_key / secret_key) below.
+func (s *Service) connectionURL(_ context.Context, address string) string {
+	return fmt.Sprintf("s3://%s:%s@%s", s.rootUser, s.rootPassword, address)
 }
 
 func (s *Service) CreateConnectionConfiguration(ctx context.Context, conf *basev0.Configuration, instance *basev0.NetworkInstance) (*basev0.Configuration, error) {
@@ -122,20 +147,37 @@ func (s *Service) CreateConnectionConfiguration(ctx context.Context, conf *basev
 		return nil, s.Wool.Wrapf(err, "cannot load configuration")
 	}
 
-	connection := s.createConnectionString(ctx, instance.Address)
-
 	outputConf := &basev0.Configuration{
 		Origin:         s.Base.Unique(),
 		RuntimeContext: resources.RuntimeContextFromInstance(instance),
-		Infos: []*basev0.ConfigurationInformation{
-			{Name: "s3",
-				ConfigurationValues: []*basev0.ConfigurationValue{
-					{Key: "connection", Value: connection, Secret: true},
-				},
-			},
-		},
+		Infos:          []*basev0.ConfigurationInformation{s.buildConnectionInfo(ctx, instance.Address)},
 	}
 	return outputConf, nil
+}
+
+// buildConnectionInfo emits the s3 ConfigurationInformation block.
+// Split out from CreateConnectionConfiguration so it's testable without
+// a fully-loaded Service identity (Base.Unique() panics until Load
+// runs). Downstream consumers (audit-exporter, app code reading
+// endpoint/access_key/secret_key) depend on this exact key shape;
+// renames here are breaking changes for them.
+//
+// Why both `connection` and the structured keys: connection is the
+// legacy s3:// URL form some libs accept directly. endpoint /
+// access_key / secret_key / region are the canonical names that
+// minio-go and the AWS SDK consume natively.
+func (s *Service) buildConnectionInfo(ctx context.Context, address string) *basev0.ConfigurationInformation {
+	return &basev0.ConfigurationInformation{
+		Name: "s3",
+		ConfigurationValues: []*basev0.ConfigurationValue{
+			{Key: "connection", Value: s.connectionURL(ctx, address), Secret: true},
+			{Key: "endpoint", Value: address},
+			{Key: "access_key", Value: s.rootUser, Secret: true},
+			{Key: "secret_key", Value: s.rootPassword, Secret: true},
+			// MinIO accepts any region; the AWS SDK requires one set.
+			{Key: "region", Value: "us-east-1"},
+		},
+	}
 }
 
 func main() {
