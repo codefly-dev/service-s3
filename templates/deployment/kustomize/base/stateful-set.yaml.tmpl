@@ -14,22 +14,89 @@ spec:
       labels:
         app: {{.Name}}
     spec:
+      # MinIO official images run as user 1000:1000 by default.
+      # fsGroup matches so the minio user can write the data dir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
       containers:
-        - name: s3
-          image: s3:7-alpine
+        - name: minio
+          # Pinned to the same tag as the local-mode image so dev and
+          # cluster behavior match. Bump in lockstep with main.go.
+          image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          # MinIO needs an explicit start command. `server /data` is
+          # the on-disk single-drive mode (matches local dev). The
+          # --console-address binds the embedded UI to a separate
+          # port so it doesn't share the S3 API listener.
+          args:
+            - server
+            - /data
+            - --console-address
+            - :9001
           ports:
-            - containerPort: 6379
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
           envFrom:
             - secretRef:
                 name: {{.Name}}-secret
+          # MinIO is RAM-hungry under load. These defaults survive
+          # idle dev; tune up in overlays for staging/prod.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          # MinIO's /minio/health/live reports liveness without
+          # touching the data path; /minio/health/ready blocks
+          # until the storage backend is reachable. Use them per
+          # their semantics.
+          startupProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           volumeMounts:
-            - name: s3-data
+            - name: minio-data
               mountPath: /data
   volumeClaimTemplates:
     - metadata:
-        name: s3-data
+        name: minio-data
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            storage: 1Gi
+            storage: 10Gi

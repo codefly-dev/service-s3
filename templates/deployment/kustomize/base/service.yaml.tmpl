@@ -7,6 +7,14 @@ spec:
   selector:
     app: {{.Name}}
   ports:
-    - port: 6379
-      targetPort: 6379
+    - name: s3
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  # Headless — pods address each other by stable DNS. For external
+  # access (e.g. dev access from the host), set up an Ingress in the
+  # overlay or port-forward kubectl. clusterIP: None keeps this
+  # discovery-only.
   clusterIP: None
