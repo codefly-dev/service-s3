@@ -203,6 +203,9 @@ func (s *Builder) CreateEndpoints(ctx context.Context) error {
 	endpoint := s.Base.BaseEndpoint(standards.TCP)
 	endpoint.Visibility = resources.VisibilityExternal
 	s.TcpEndpoint, err = resources.NewAPI(ctx, endpoint, resources.ToTCPAPI(tcp))
+	if err != nil {
+		return s.Wool.Wrapf(err, "cannot create tcp endpoint")
+	}
 	s.Endpoints = []*v0.Endpoint{s.TcpEndpoint}
 	return nil
 }
