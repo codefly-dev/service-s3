@@ -23,6 +23,10 @@ type Runtime struct {
 	// internal
 	runnerEnvironment *dockerrun.DockerEnvironment
 
+	// nixRuntime is set instead of runnerEnvironment when the caller requests
+	// RuntimeContextNix — minio runs natively from a nix-provisioned binary.
+	nixRuntime *nixMinio
+
 	s3Port uint16
 }
 
@@ -116,16 +120,8 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 	}
 	s.Wool.Debug("sending runtime configuration", wool.Field("conf", resources.MakeManyConfigurationSummary(s.Runtime.RuntimeConfigurations)))
 
-	// Docker
-	runner, err := dockerrun.NewDockerHeadlessEnvironment(ctx, image, s.UniqueWithWorkspace())
-	if err != nil {
-		return s.Runtime.InitError(err)
-	}
-
-	runner.WithOutput(s.Wool)
-	runner.WithPortMapping(ctx, uint16(instance.Port), s.s3Port)
-
-	// Load creds from configuration (defaults to MinIO defaults).
+	// Load creds from configuration (defaults to MinIO defaults). Needed by both
+	// runtimes.
 	err = s.LoadConfiguration(ctx, s.Configuration)
 	if err != nil {
 		return s.Runtime.InitError(err)
@@ -138,20 +134,40 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 		return s.Runtime.InitError(w.NewError("MINIO_ROOT_PASSWORD must be >= 8 chars"))
 	}
 
-	runner.WithEnvironmentVariables(ctx,
-		resources.Env("MINIO_ROOT_USER", s.rootUser),
-		resources.Env("MINIO_ROOT_PASSWORD", s.rootPassword),
-	)
-	// `server /data` is MinIO's standard single-node command. We omit
-	// --console-address — codefly only exposes the S3 API port.
-	runner.WithCommand("server", "/data")
-
-	s.runnerEnvironment = runner
-
-	w.Debug("init for runner environment: will start container")
-	err = s.runnerEnvironment.Init(ctx)
-	if err != nil {
-		return s.Runtime.InitError(err)
+	// Nix runtime: run minio natively from a nix-provisioned binary instead of a
+	// Docker container — selected when the caller requests RuntimeContextNix
+	// (e.g. a host without Docker). minio binds the assigned port directly, so
+	// WaitForReady is unchanged.
+	if rc := req.GetRuntimeContext(); rc != nil && rc.Kind == resources.RuntimeContextNix {
+		s.Infof("using nix runtime for minio on port %d", instance.Port)
+		nixm, errNix := newNixMinio(ctx, s.Location, uint16(instance.Port), s.rootUser, s.rootPassword, s.Wool)
+		if errNix != nil {
+			return s.Runtime.InitError(errNix)
+		}
+		if errNix = nixm.Init(ctx); errNix != nil {
+			return s.Runtime.InitError(errNix)
+		}
+		s.nixRuntime = nixm
+	} else {
+		// Docker
+		runner, errDocker := dockerrun.NewDockerHeadlessEnvironment(ctx, image, s.UniqueWithWorkspace())
+		if errDocker != nil {
+			return s.Runtime.InitError(errDocker)
+		}
+		runner.WithOutput(s.Wool)
+		runner.WithPortMapping(ctx, uint16(instance.Port), s.s3Port)
+		runner.WithEnvironmentVariables(ctx,
+			resources.Env("MINIO_ROOT_USER", s.rootUser),
+			resources.Env("MINIO_ROOT_PASSWORD", s.rootPassword),
+		)
+		// `server /data` is MinIO's standard single-node command. We omit
+		// --console-address — codefly only exposes the S3 API port.
+		runner.WithCommand("server", "/data")
+		s.runnerEnvironment = runner
+		w.Debug("init for runner environment: will start container")
+		if errDocker = s.runnerEnvironment.Init(ctx); errDocker != nil {
+			return s.Runtime.InitError(errDocker)
+		}
 	}
 
 	s.Wool.Debug("init successful")
@@ -234,6 +250,14 @@ func (s *Runtime) Destroy(ctx context.Context, req *runtimev0.DestroyRequest) (*
 	ctx = s.Wool.Inject(ctx)
 
 	s.Wool.Debug("Destroying")
+
+	// Nix runtime: terminate the native minio process; there is no container.
+	if s.nixRuntime != nil {
+		if err := s.nixRuntime.Stop(ctx); err != nil {
+			return s.Runtime.DestroyError(err)
+		}
+		return s.Runtime.DestroyResponse()
+	}
 
 	runner, err := dockerrun.NewDockerHeadlessEnvironment(ctx, image, s.UniqueWithWorkspace())
 	if err != nil {
