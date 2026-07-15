@@ -27,9 +27,9 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: minio
-          # Pinned to the same tag as the local-mode image so dev and
-          # cluster behavior match. Bump in lockstep with main.go.
-          image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+          # Supplied by main.go's image declaration so local and cluster
+          # behavior use the same exact tag and digest.
+          image: {{ .Image }}
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

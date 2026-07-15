@@ -46,7 +46,11 @@ type Settings struct {
 // MinIO is the local S3-compatible store; same API surface as AWS
 // S3, R2, GCS-S3-mode — production swaps the endpoint env without
 // touching application code.
-var image = &resources.DockerImage{Name: "minio/minio", Tag: "RELEASE.2025-09-07T16-13-09Z"}
+var image = &resources.DockerImage{
+	Name:   "minio/minio",
+	Tag:    "RELEASE.2025-09-07T16-13-09Z",
+	Digest: "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+}
 
 type Service struct {
 	*services.Base
