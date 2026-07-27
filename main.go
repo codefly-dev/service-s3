@@ -38,7 +38,7 @@ type Settings struct {
 	RootPassword string `yaml:"root-password"`
 }
 
-// image — pinned MinIO release. NEVER :latest (project policy):
+// image — digest-pinned MinIO release. NEVER :latest (project policy):
 // the bucket layout, IAM behaviour, and admin endpoints can shift
 // between releases; an unpinned tag means a re-pull silently changes
 // behaviour. Bump deliberately when upgrading.
@@ -47,9 +47,10 @@ type Settings struct {
 // S3, R2, GCS-S3-mode — production swaps the endpoint env without
 // touching application code.
 var image = &resources.DockerImage{
-	Name:   "minio/minio",
-	Tag:    "RELEASE.2025-09-07T16-13-09Z",
-	Digest: "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+	Repository: "cgr.dev/chainguard",
+	Name:       "minio",
+	Tag:        "RELEASE.2026-07-17T12-07-51Z",
+	Digest:     "sha256:fa23f6a6f62645654530ff94aa077d1cc0d0e44c8f1cce02ab039873612edc72",
 }
 
 type Service struct {

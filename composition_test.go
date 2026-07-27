@@ -9,6 +9,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestRuntimeImagePin(t *testing.T) {
+	const want = "cgr.dev/chainguard/minio@sha256:fa23f6a6f62645654530ff94aa077d1cc0d0e44c8f1cce02ab039873612edc72"
+	if got := image.FullName(); got != want {
+		t.Fatalf("runtime image: got %q, want %q", got, want)
+	}
+}
+
 // TestNewService_EmbedsBase — wiring smoke test: the Service struct
 // must compose services.Base or none of the gRPC plumbing the agent
 // runtime relies on works.
