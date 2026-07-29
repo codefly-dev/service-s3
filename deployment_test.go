@@ -28,23 +28,20 @@ func TestDeploymentTemplates(t *testing.T) {
 func TestPromotableGitOpsDeployment(t *testing.T) {
 	ctx := context.Background()
 	builder := NewBuilder()
-	identity := &resources.ServiceIdentity{
+	identity := &basev0.ServiceIdentity{
 		Workspace: "workspace",
 		Module:    "module",
 		Name:      "s3",
 		Version:   "1.2.3",
 	}
-	builder.Identity = identity
-	builder.Information = &services.Information{
-		Service: resources.ToServiceWithCase(identity),
-		Module:  resources.ToModuleWithCase(identity),
+	if err := builder.HeadlessLoad(ctx, identity); err != nil {
+		t.Fatal(err)
 	}
-	builder.EnvironmentVariables.SetIdentity(&basev0.ServiceIdentity{
-		Workspace: identity.Workspace,
-		Module:    identity.Module,
-		Name:      identity.Name,
-		Version:   identity.Version,
-	})
+	builder.Information = &services.Information{
+		Service: resources.ToServiceWithCase(builder.Identity),
+		Module:  resources.ToModuleWithCase(builder.Identity),
+	}
+	builder.EnvironmentVariables.SetIdentity(identity)
 	builder.TcpEndpoint = &basev0.Endpoint{
 		Name:    "tcp",
 		Module:  identity.Module,
@@ -88,11 +85,8 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.GetState().GetState() != builderv0.DeploymentStatus_ERROR {
-		t.Fatalf("deployment status: got %s, want server-validation error", response.GetState().GetState())
-	}
-	if !strings.Contains(response.GetState().GetMessage(), "requires successful server-side validation") {
-		t.Fatalf("deployment error: %s", response.GetState().GetMessage())
+	if response.GetState().GetState() != builderv0.DeploymentStatus_SUCCESS {
+		t.Fatalf("deployment failed: %s", response.GetState().GetMessage())
 	}
 	output := response.GetDeployment().GetKubernetes()
 	if output.GetProfile() != builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1 {
@@ -103,6 +97,9 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 	}
 	if output.GetValidation().GetStaticValidation() != builderv0.KubernetesManifestValidation_STATUS_PASSED {
 		t.Fatalf("static validation: %v", output.GetValidation().GetViolations())
+	}
+	if !output.GetValidation().GetPromotable() {
+		t.Fatalf("deployment is not promotable: %v", output.GetValidation().GetViolations())
 	}
 
 	for _, relative := range []string{
