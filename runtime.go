@@ -26,8 +26,7 @@ type Runtime struct {
 	// RuntimeContextNix — minio runs natively from a nix-provisioned binary.
 	nixRuntime *nixMinio
 
-	s3Port        uint16
-	configuration *basev0.Configuration
+	s3Port uint16
 }
 
 func NewRuntime() *Runtime {
@@ -65,7 +64,7 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 
 	s.NetworkMappings = req.ProposedNetworkMappings
 
-	s.configuration = req.Configuration
+	configuration := req.GetConfiguration()
 
 	net, err := resources.FindNetworkMapping(ctx, s.NetworkMappings, s.TcpEndpoint)
 	if err != nil {
@@ -95,7 +94,7 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 
 	// Create connection string resources for the network instance
 	for _, inst := range net.Instances {
-		conf, errConn := s.CreateConnectionConfiguration(ctx, s.configuration, inst)
+		conf, errConn := s.CreateConnectionConfiguration(ctx, configuration, inst)
 		if errConn != nil {
 			return s.Runtime.InitError(errConn)
 		}
@@ -106,7 +105,7 @@ func (s *Runtime) Init(ctx context.Context, req *runtimev0.InitRequest) (*runtim
 
 	// Load creds from configuration (defaults to MinIO defaults). Needed by both
 	// runtimes.
-	err = s.LoadConfiguration(ctx, s.configuration)
+	err = s.LoadConfiguration(ctx, configuration)
 	if err != nil {
 		return s.Runtime.InitError(err)
 	}
