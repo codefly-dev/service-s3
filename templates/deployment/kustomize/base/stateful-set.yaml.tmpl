@@ -14,6 +14,7 @@ spec:
       labels:
         app: {{.Name}}
     spec:
+      automountServiceAccountToken: false
       # MinIO official images run as user 1000:1000 by default.
       # fsGroup matches so the minio user can write the data dir.
       securityContext:
@@ -35,6 +36,7 @@ spec:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
             runAsUser: 1000
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -54,9 +56,21 @@ spec:
               containerPort: 9000
             - name: console
               containerPort: 9001
+{{- if not .GitOps }}
           envFrom:
             - secretRef:
                 name: {{.Name}}-secret
+{{- else }}
+          env:
+{{- range $environmentVariable, $reference := .SecretReferences }}
+            - name: {{ $environmentVariable }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $reference.Name }}
+                  key: {{ $reference.Key }}
+                  optional: {{ $reference.Optional }}
+{{- end }}
+{{- end }}
           # MinIO is RAM-hungry under load. These defaults survive
           # idle dev; tune up in overlays for staging/prod.
           resources:

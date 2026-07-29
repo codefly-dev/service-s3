@@ -159,6 +159,22 @@ func (s *Service) CreateConnectionConfiguration(ctx context.Context, conf *basev
 	return outputConf, nil
 }
 
+func (s *Service) createGitOpsConnectionConfiguration(instance *basev0.NetworkInstance) *basev0.Configuration {
+	return &basev0.Configuration{
+		Origin:         s.Base.Unique(),
+		RuntimeContext: resources.RuntimeContextFromInstance(instance),
+		Infos: []*basev0.ConfigurationInformation{
+			{
+				Name: "s3",
+				ConfigurationValues: []*basev0.ConfigurationValue{
+					{Key: "endpoint", Value: instance.Address},
+					{Key: "region", Value: "us-east-1"},
+				},
+			},
+		},
+	}
+}
+
 // buildConnectionInfo emits the s3 ConfigurationInformation block.
 // Split out from CreateConnectionConfiguration so it's testable without
 // a fully-loaded Service identity (Base.Unique() panics until Load

@@ -110,9 +110,14 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 			if err != nil {
 				return err
 			}
-			configuration, err := s.CreateConnectionConfiguration(ctx, req.GetConfiguration(), instance)
-			if err != nil {
-				return err
+			var configuration *v0.Configuration
+			if deployment.Profile == builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1 {
+				configuration = s.createGitOpsConnectionConfiguration(instance)
+			} else {
+				configuration, err = s.CreateConnectionConfiguration(ctx, req.GetConfiguration(), instance)
+				if err != nil {
+					return err
+				}
 			}
 			s.Wool.Debug("exporting configuration", wool.Field("conf", resources.MakeConfigurationSummary(configuration)))
 			return deployment.ExportConfiguration(ctx, configuration)
