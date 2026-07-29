@@ -177,6 +177,37 @@ func TestBuildConnectionInfo_SecretsAreMarkedSecret(t *testing.T) {
 	}
 }
 
+func TestGitOpsConnectionConfigurationOmitsCredentials(t *testing.T) {
+	svc := NewService()
+	svc.Identity = &resources.ServiceIdentity{Module: "module", Name: "s3"}
+	svc.rootUser = "ops"
+	svc.rootPassword = "supersecret"
+
+	instance := resources.NewNetworkInstance("s3.example", 9000)
+	instance.Access = resources.NewPublicNetworkAccess()
+	configuration := svc.createGitOpsConnectionConfiguration(instance)
+
+	got := map[string]string{}
+	for _, value := range configuration.GetInfos()[0].GetConfigurationValues() {
+		if value.GetSecret() {
+			t.Errorf("configuration value %q is secret", value.GetKey())
+		}
+		got[value.GetKey()] = value.GetValue()
+	}
+	want := map[string]string{
+		"endpoint": "s3.example:9000",
+		"region":   "us-east-1",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("configuration values: got %v, want %v", got, want)
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("configuration value %q: got %q, want %q", key, got[key], value)
+		}
+	}
+}
+
 // Sanity — the package compiles with the resources import we need
 // for the integration test below to build, and the connection
 // configuration message uses the proto schema we expect.

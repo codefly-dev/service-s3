@@ -36,10 +36,10 @@ spec:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
             runAsUser: 1000
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
-            readOnlyRootFilesystem: true
             seccompProfile:
               type: RuntimeDefault
           # MinIO needs an explicit start command. `server /data` is
@@ -60,15 +60,15 @@ spec:
           envFrom:
             - secretRef:
                 name: {{.Name}}-secret
-{{- end }}
-{{- if .GitOps }}
+{{- else }}
           env:
-{{- range $key, $reference := .SecretReferences }}
-            - name: {{ $key }}
+{{- range $environmentVariable, $reference := .SecretReferences }}
+            - name: {{ $environmentVariable }}
               valueFrom:
                 secretKeyRef:
                   name: {{ $reference.Name }}
                   key: {{ $reference.Key }}
+                  optional: {{ $reference.Optional }}
 {{- end }}
 {{- end }}
           # MinIO is RAM-hungry under load. These defaults survive
