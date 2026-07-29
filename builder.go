@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"fmt"
 
 	"github.com/codefly-dev/core/agents/communicate"
 	v0 "github.com/codefly-dev/core/generated/go/codefly/base/v0"
@@ -106,6 +107,11 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 		EnvironmentVariables: s.EnvironmentVariables,
 		Templates:            deploymentFS,
 		Prepare: func(ctx context.Context, deployment *services.KustomizeDeploymentContext) error {
+			if deployment.Profile == builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1 {
+				if err := validatePromotableGitOpsSecretReferences(deployment.Kubernetes.GetSecretReferences()); err != nil {
+					return err
+				}
+			}
 			instance, err := resources.FindNetworkInstanceInNetworkMappings(ctx, req.GetNetworkMappings(), s.TcpEndpoint, resources.NewPublicNetworkAccess())
 			if err != nil {
 				return err
@@ -123,6 +129,19 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 			return deployment.ExportConfiguration(ctx, configuration)
 		},
 	})
+}
+
+func validatePromotableGitOpsSecretReferences(references map[string]*builderv0.KubernetesSecretKeyReference) error {
+	for _, environmentVariable := range [...]string{"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"} {
+		reference, ok := references[environmentVariable]
+		if !ok {
+			return fmt.Errorf("promotable GitOps rendering requires secret reference %q", environmentVariable)
+		}
+		if reference.GetOptional() {
+			return fmt.Errorf("promotable GitOps rendering %q secret reference must not be optional", environmentVariable)
+		}
+	}
+	return nil
 }
 
 func (s *Builder) Create(ctx context.Context, req *builderv0.CreateRequest) (*builderv0.CreateResponse, error) {

@@ -138,3 +138,133 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 		t.Fatalf("GitOps StatefulSet uses ephemeral Secret envFrom:\n%s", manifest)
 	}
 }
+
+func TestPromotableGitOpsDeploymentRequiresCredentialReferences(t *testing.T) {
+	validReferences := func() map[string]*builderv0.KubernetesSecretKeyReference {
+		return map[string]*builderv0.KubernetesSecretKeyReference{
+			"MINIO_ROOT_USER": {
+				Name: "s3-credentials",
+				Key:  "root-user",
+			},
+			"MINIO_ROOT_PASSWORD": {
+				Name: "s3-credentials",
+				Key:  "root-password",
+			},
+		}
+	}
+	tests := []struct {
+		name       string
+		references func() map[string]*builderv0.KubernetesSecretKeyReference
+		wantError  string
+	}{
+		{
+			name:       "no references",
+			references: func() map[string]*builderv0.KubernetesSecretKeyReference { return nil },
+			wantError:  `requires secret reference "MINIO_ROOT_USER"`,
+		},
+		{
+			name: "missing root user",
+			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
+				references := validReferences()
+				delete(references, "MINIO_ROOT_USER")
+				return references
+			},
+			wantError: `requires secret reference "MINIO_ROOT_USER"`,
+		},
+		{
+			name: "missing root password",
+			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
+				references := validReferences()
+				delete(references, "MINIO_ROOT_PASSWORD")
+				return references
+			},
+			wantError: `requires secret reference "MINIO_ROOT_PASSWORD"`,
+		},
+		{
+			name: "optional root user",
+			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
+				references := validReferences()
+				references["MINIO_ROOT_USER"].Optional = true
+				return references
+			},
+			wantError: `"MINIO_ROOT_USER" secret reference must not be optional`,
+		},
+		{
+			name: "optional root password",
+			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
+				references := validReferences()
+				references["MINIO_ROOT_PASSWORD"].Optional = true
+				return references
+			},
+			wantError: `"MINIO_ROOT_PASSWORD" secret reference must not be optional`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			builder := NewBuilder()
+			identity := &resources.ServiceIdentity{
+				Workspace: "workspace",
+				Module:    "module",
+				Name:      "s3",
+				Version:   "1.2.3",
+			}
+			builder.Identity = identity
+			builder.Information = &services.Information{
+				Service: resources.ToServiceWithCase(identity),
+				Module:  resources.ToModuleWithCase(identity),
+			}
+			builder.EnvironmentVariables.SetIdentity(&basev0.ServiceIdentity{
+				Workspace: identity.Workspace,
+				Module:    identity.Module,
+				Name:      identity.Name,
+				Version:   identity.Version,
+			})
+			builder.TcpEndpoint = &basev0.Endpoint{
+				Name:    "tcp",
+				Module:  identity.Module,
+				Service: identity.Name,
+				Api:     "tcp",
+			}
+			instance := resources.NewNetworkInstance("s3.example", 9000)
+			instance.Access = resources.NewPublicNetworkAccess()
+			destination := t.TempDir()
+
+			response, err := builder.Deploy(context.Background(), &builderv0.DeploymentRequest{
+				Environment: &basev0.Environment{Name: "test"},
+				NetworkMappings: []*basev0.NetworkMapping{
+					{
+						Endpoint:  builder.TcpEndpoint,
+						Instances: []*basev0.NetworkInstance{instance},
+					},
+				},
+				Deployment: &builderv0.Deployment{
+					Kind: &builderv0.Deployment_Kubernetes{
+						Kubernetes: &builderv0.KubernetesDeployment{
+							Namespace:        "codefly-test",
+							Destination:      destination,
+							Profile:          builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1,
+							SecretReferences: test.references(),
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.GetState().GetState() != builderv0.DeploymentStatus_ERROR {
+				t.Fatalf("deployment status: got %s, want %s", response.GetState().GetState(), builderv0.DeploymentStatus_ERROR)
+			}
+			if !strings.Contains(response.GetState().GetMessage(), test.wantError) {
+				t.Fatalf("deployment error: got %q, want it to contain %q", response.GetState().GetMessage(), test.wantError)
+			}
+			entries, err := os.ReadDir(destination)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("deployment wrote manifests before rejecting invalid credentials: %v", entries)
+			}
+		})
+	}
+}
