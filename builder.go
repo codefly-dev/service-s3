@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"strings"
 
 	"github.com/codefly-dev/core/agents/communicate"
 	v0 "github.com/codefly-dev/core/generated/go/codefly/base/v0"
@@ -108,9 +109,11 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 		Templates:            deploymentFS,
 		Prepare: func(ctx context.Context, deployment *services.KustomizeDeploymentContext) error {
 			if deployment.Profile == builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1 {
-				if err := validatePromotableGitOpsSecretReferences(deployment.Kubernetes.GetSecretReferences()); err != nil {
+				references, err := minioGitOpsSecretReferences(deployment.Kubernetes.GetSecretReferences())
+				if err != nil {
 					return err
 				}
+				deployment.Kubernetes.SecretReferences = references
 			}
 			instance, err := resources.FindNetworkInstanceInNetworkMappings(ctx, req.GetNetworkMappings(), s.TcpEndpoint, resources.NewPublicNetworkAccess())
 			if err != nil {
@@ -131,17 +134,34 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 	})
 }
 
-func validatePromotableGitOpsSecretReferences(references map[string]*builderv0.KubernetesSecretKeyReference) error {
-	for _, environmentVariable := range [...]string{"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"} {
-		reference, ok := references[environmentVariable]
-		if !ok {
-			return fmt.Errorf("promotable GitOps rendering requires secret reference %q", environmentVariable)
+func minioGitOpsSecretReferences(
+	references map[string]*builderv0.KubernetesSecretKeyReference,
+) (map[string]*builderv0.KubernetesSecretKeyReference, error) {
+	if len(references) != 2 {
+		return nil, fmt.Errorf("promotable GitOps rendering requires exactly two canonical MinIO credential references")
+	}
+	mapped := make(map[string]*builderv0.KubernetesSecretKeyReference, 2)
+	for source, reference := range references {
+		var environmentVariable string
+		switch {
+		case strings.HasPrefix(source, "CODEFLY__SERVICE_SECRET_CONFIGURATION__") &&
+			strings.HasSuffix(source, "__S3__MINIO_ROOT_USER"):
+			environmentVariable = "MINIO_ROOT_USER"
+		case strings.HasPrefix(source, "CODEFLY__SERVICE_SECRET_CONFIGURATION__") &&
+			strings.HasSuffix(source, "__S3__MINIO_ROOT_PASSWORD"):
+			environmentVariable = "MINIO_ROOT_PASSWORD"
+		default:
+			return nil, fmt.Errorf("promotable GitOps rendering requires canonical MinIO credential references")
 		}
 		if reference.GetOptional() {
-			return fmt.Errorf("promotable GitOps rendering %q secret reference must not be optional", environmentVariable)
+			return nil, fmt.Errorf("promotable GitOps rendering %q secret reference must not be optional", environmentVariable)
 		}
+		mapped[environmentVariable] = reference
 	}
-	return nil
+	if len(mapped) != 2 {
+		return nil, fmt.Errorf("promotable GitOps rendering requires both canonical MinIO credential references")
+	}
+	return mapped, nil
 }
 
 func (s *Builder) Create(ctx context.Context, req *builderv0.CreateRequest) (*builderv0.CreateResponse, error) {
