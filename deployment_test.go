@@ -329,8 +329,14 @@ func TestManifestGuardRender(t *testing.T) {
 					Destination: destination,
 					Profile:     profile,
 					SecretReferences: map[string]*builderv0.KubernetesSecretKeyReference{
-						"MINIO_ROOT_USER":     {Name: "s3-credentials", Key: "root-user"},
-						"MINIO_ROOT_PASSWORD": {Name: "s3-credentials", Key: "root-password"},
+						"CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER": {
+							Name: "s3-credentials",
+							Key:  "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER",
+						},
+						"CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD": {
+							Name: "s3-credentials",
+							Key:  "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD",
+						},
 					},
 				},
 			},
