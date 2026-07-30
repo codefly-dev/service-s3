@@ -25,7 +25,7 @@ func TestDeploymentTemplates(t *testing.T) {
 	}
 }
 
-func TestPromotableGitOpsDeployment(t *testing.T) {
+func TestRestrictedPortableDeployment(t *testing.T) {
 	ctx := context.Background()
 	builder := NewBuilder()
 	identity := &basev0.ServiceIdentity{
@@ -67,7 +67,7 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 				Kubernetes: &builderv0.KubernetesDeployment{
 					Namespace:   "codefly-test",
 					Destination: destination,
-					Profile:     builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1,
+					Profile:     builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_RESTRICTED_PORTABLE_V1,
 					SecretReferences: map[string]*builderv0.KubernetesSecretKeyReference{
 						"MINIO_ROOT_USER": {
 							Name: "s3-credentials",
@@ -89,7 +89,7 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 		t.Fatalf("deployment failed: %s", response.GetState().GetMessage())
 	}
 	output := response.GetDeployment().GetKubernetes()
-	if output.GetProfile() != builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1 {
+	if output.GetProfile() != builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_RESTRICTED_PORTABLE_V1 {
 		t.Fatalf("output profile: got %s", output.GetProfile())
 	}
 	if output.GetContractVersion() != services.KubernetesManifestContractVersion {
@@ -98,9 +98,10 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 	if output.GetValidation().GetStaticValidation() != builderv0.KubernetesManifestValidation_STATUS_PASSED {
 		t.Fatalf("static validation: %v", output.GetValidation().GetViolations())
 	}
-	if !output.GetValidation().GetPromotable() {
-		t.Fatalf("deployment is not promotable: %v", output.GetValidation().GetViolations())
+	if !output.GetValidation().GetRestricted() {
+		t.Fatalf("output is not restricted: %v", output.GetValidation().GetViolations())
 	}
+	assertRestrictedManifestBundle(t, output)
 
 	for _, relative := range []string{
 		filepath.Join("base", "namespace.yaml"),
@@ -111,7 +112,7 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 			t.Fatal(readErr)
 		}
 		if strings.TrimSpace(string(content)) != "" {
-			t.Fatalf("%s must be empty for GitOps:\n%s", relative, content)
+			t.Fatalf("%s must be empty for restricted output:\n%s", relative, content)
 		}
 	}
 	statefulSet, err := os.ReadFile(filepath.Join(destination, "base", "stateful-set.yaml"))
@@ -132,11 +133,11 @@ func TestPromotableGitOpsDeployment(t *testing.T) {
 		}
 	}
 	if strings.Contains(manifest, "envFrom:") {
-		t.Fatalf("GitOps StatefulSet uses ephemeral Secret envFrom:\n%s", manifest)
+		t.Fatalf("restricted StatefulSet uses ephemeral Secret envFrom:\n%s", manifest)
 	}
 }
 
-func TestPromotableGitOpsDeploymentRequiresCredentialReferences(t *testing.T) {
+func TestRestrictedPortableDeploymentRequiresCredentialReferences(t *testing.T) {
 	validReferences := func() map[string]*builderv0.KubernetesSecretKeyReference {
 		return map[string]*builderv0.KubernetesSecretKeyReference{
 			"MINIO_ROOT_USER": {
@@ -240,7 +241,7 @@ func TestPromotableGitOpsDeploymentRequiresCredentialReferences(t *testing.T) {
 						Kubernetes: &builderv0.KubernetesDeployment{
 							Namespace:        "codefly-test",
 							Destination:      destination,
-							Profile:          builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1,
+							Profile:          builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_RESTRICTED_PORTABLE_V1,
 							SecretReferences: test.references(),
 						},
 					},
@@ -263,5 +264,122 @@ func TestPromotableGitOpsDeploymentRequiresCredentialReferences(t *testing.T) {
 				t.Fatalf("deployment wrote manifests before rejecting invalid credentials: %v", entries)
 			}
 		})
+	}
+}
+
+// TestManifestGuardRender is the render entry point for the shared
+// manifest-only conformance workflow. It drives the production Deploy path
+// into CODEFLY_MANIFEST_DESTINATION with the caller-supplied environment,
+// namespace, and profile, so the guard can render twice and prove the tree is
+// deterministic. With no destination set it skips, keeping `go test ./...`
+// runnable without the guard's environment.
+func TestManifestGuardRender(t *testing.T) {
+	destination := os.Getenv("CODEFLY_MANIFEST_DESTINATION")
+	if destination == "" {
+		t.Skip("CODEFLY_MANIFEST_DESTINATION unset; skipping manifest-guard render")
+	}
+	environment := os.Getenv("CODEFLY_MANIFEST_ENVIRONMENT")
+	namespace := os.Getenv("CODEFLY_MANIFEST_NAMESPACE")
+	profile := builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_RESTRICTED_PORTABLE_V1
+	if name := os.Getenv("CODEFLY_MANIFEST_PROFILE"); name != "" {
+		value, ok := builderv0.KubernetesOutputProfile_value[name]
+		if !ok {
+			t.Fatalf("unknown CODEFLY_MANIFEST_PROFILE %q", name)
+		}
+		profile = builderv0.KubernetesOutputProfile(value)
+	}
+
+	ctx := context.Background()
+	builder := NewBuilder()
+	identity := &basev0.ServiceIdentity{
+		Workspace: "workspace",
+		Module:    "module",
+		Name:      "s3",
+		Version:   "1.2.3",
+	}
+	if err := builder.HeadlessLoad(ctx, identity); err != nil {
+		t.Fatal(err)
+	}
+	builder.Information = &services.Information{
+		Service: resources.ToServiceWithCase(builder.Identity),
+		Module:  resources.ToModuleWithCase(builder.Identity),
+	}
+	builder.EnvironmentVariables.SetIdentity(identity)
+	builder.TcpEndpoint = &basev0.Endpoint{
+		Name:    "tcp",
+		Module:  identity.Module,
+		Service: identity.Name,
+		Api:     "tcp",
+	}
+	instance := resources.NewNetworkInstance("s3.example", 9000)
+	instance.Access = resources.NewPublicNetworkAccess()
+
+	response, err := builder.Deploy(ctx, &builderv0.DeploymentRequest{
+		Environment: &basev0.Environment{Name: environment},
+		NetworkMappings: []*basev0.NetworkMapping{
+			{
+				Endpoint:  builder.TcpEndpoint,
+				Instances: []*basev0.NetworkInstance{instance},
+			},
+		},
+		Deployment: &builderv0.Deployment{
+			Kind: &builderv0.Deployment_Kubernetes{
+				Kubernetes: &builderv0.KubernetesDeployment{
+					Namespace:   namespace,
+					Destination: destination,
+					Profile:     profile,
+					SecretReferences: map[string]*builderv0.KubernetesSecretKeyReference{
+						"MINIO_ROOT_USER":     {Name: "s3-credentials", Key: "root-user"},
+						"MINIO_ROOT_PASSWORD": {Name: "s3-credentials", Key: "root-password"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetState().GetState() != builderv0.DeploymentStatus_SUCCESS {
+		t.Fatalf("manifest-guard render failed: %s", response.GetState().GetMessage())
+	}
+}
+
+func assertRestrictedManifestBundle(t *testing.T, output *builderv0.KubernetesDeploymentOutput) {
+	t.Helper()
+	bundle := output.GetBundle()
+	if bundle == nil {
+		t.Fatal("restricted output carries no manifest bundle")
+	}
+	if bundle.GetFormat() != builderv0.KubernetesDeploymentOutput_KUSTOMIZE {
+		t.Errorf("bundle format = %s", bundle.GetFormat())
+	}
+	if bundle.GetProfile() != builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_RESTRICTED_PORTABLE_V1 {
+		t.Errorf("bundle profile = %s", bundle.GetProfile())
+	}
+	if bundle.GetContractVersion() != services.KubernetesManifestContractVersion {
+		t.Errorf("bundle contract version = %q", bundle.GetContractVersion())
+	}
+	if len(bundle.GetEntryPoints()) == 0 {
+		t.Error("bundle exposes no entry points")
+	}
+	if !strings.HasPrefix(bundle.GetDigest(), "sha256:") {
+		t.Errorf("bundle digest = %q, want sha256-pinned aggregate", bundle.GetDigest())
+	}
+	if len(bundle.GetFiles()) == 0 {
+		t.Fatal("bundle inventory is empty")
+	}
+	for _, file := range bundle.GetFiles() {
+		if file.GetPath() == "" || !strings.HasPrefix(file.GetDigest(), "sha256:") {
+			t.Errorf("bundle inventory entry = %+v, want path and sha256 digest", file)
+		}
+	}
+	if bundle.GetValidation().GetStaticValidation() != builderv0.KubernetesManifestValidation_STATUS_PASSED {
+		t.Errorf("bundle validation not passed: %v", bundle.GetValidation().GetViolations())
+	}
+	for _, environmentVariable := range []string{"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"} {
+		reference := bundle.GetSecretReferences()[environmentVariable]
+		if reference.GetName() == "" || reference.GetKey() == "" {
+			t.Errorf("bundle dropped external secret reference %q", environmentVariable)
+		}
 	}
 }
