@@ -177,7 +177,7 @@ func TestBuildConnectionInfo_SecretsAreMarkedSecret(t *testing.T) {
 	}
 }
 
-func TestGitOpsConnectionConfigurationOmitsCredentials(t *testing.T) {
+func TestRestrictedConnectionConfigurationOmitsCredentials(t *testing.T) {
 	svc := NewService()
 	svc.Identity = &resources.ServiceIdentity{Module: "module", Name: "s3"}
 	svc.rootUser = "ops"
@@ -185,7 +185,7 @@ func TestGitOpsConnectionConfigurationOmitsCredentials(t *testing.T) {
 
 	instance := resources.NewNetworkInstance("s3.example", 9000)
 	instance.Access = resources.NewPublicNetworkAccess()
-	configuration := svc.createGitOpsConnectionConfiguration(instance)
+	configuration := svc.createRestrictedConnectionConfiguration(instance)
 
 	got := map[string]string{}
 	for _, value := range configuration.GetInfos()[0].GetConfigurationValues() {

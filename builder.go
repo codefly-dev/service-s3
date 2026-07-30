@@ -108,8 +108,9 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 		EnvironmentVariables: s.EnvironmentVariables,
 		Templates:            deploymentFS,
 		Prepare: func(ctx context.Context, deployment *services.KustomizeDeploymentContext) error {
-			if deployment.Profile == builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1 {
-				references, err := minioGitOpsSecretReferences(deployment.Kubernetes.GetSecretReferences())
+			restricted := services.IsRestrictedOutputProfile(deployment.Profile)
+			if restricted {
+				references, err := minioRestrictedSecretReferences(deployment.Kubernetes.GetSecretReferences())
 				if err != nil {
 					return err
 				}
@@ -120,8 +121,8 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 				return err
 			}
 			var configuration *v0.Configuration
-			if deployment.Profile == builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_PROMOTABLE_GITOPS_V1 {
-				configuration = s.createGitOpsConnectionConfiguration(instance)
+			if restricted {
+				configuration = s.createRestrictedConnectionConfiguration(instance)
 			} else {
 				configuration, err = s.CreateConnectionConfiguration(ctx, req.GetConfiguration(), instance)
 				if err != nil {
@@ -134,11 +135,11 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 	})
 }
 
-func minioGitOpsSecretReferences(
+func minioRestrictedSecretReferences(
 	references map[string]*builderv0.KubernetesSecretKeyReference,
 ) (map[string]*builderv0.KubernetesSecretKeyReference, error) {
 	if len(references) != 2 {
-		return nil, fmt.Errorf("promotable GitOps rendering requires exactly two canonical MinIO credential references")
+		return nil, fmt.Errorf("restricted rendering requires exactly two canonical MinIO credential references")
 	}
 	mapped := make(map[string]*builderv0.KubernetesSecretKeyReference, 2)
 	for source, reference := range references {
@@ -151,15 +152,15 @@ func minioGitOpsSecretReferences(
 			strings.HasSuffix(source, "__S3__MINIO_ROOT_PASSWORD"):
 			environmentVariable = "MINIO_ROOT_PASSWORD"
 		default:
-			return nil, fmt.Errorf("promotable GitOps rendering requires canonical MinIO credential references")
+			return nil, fmt.Errorf("restricted rendering requires canonical MinIO credential references")
 		}
 		if reference.GetOptional() {
-			return nil, fmt.Errorf("promotable GitOps rendering %q secret reference must not be optional", environmentVariable)
+			return nil, fmt.Errorf("restricted rendering %q secret reference must not be optional", environmentVariable)
 		}
 		mapped[environmentVariable] = reference
 	}
 	if len(mapped) != 2 {
-		return nil, fmt.Errorf("promotable GitOps rendering requires both canonical MinIO credential references")
+		return nil, fmt.Errorf("restricted rendering requires both canonical MinIO credential references")
 	}
 	return mapped, nil
 }

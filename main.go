@@ -159,7 +159,7 @@ func (s *Service) CreateConnectionConfiguration(ctx context.Context, conf *basev
 	return outputConf, nil
 }
 
-func (s *Service) createGitOpsConnectionConfiguration(instance *basev0.NetworkInstance) *basev0.Configuration {
+func (s *Service) createRestrictedConnectionConfiguration(instance *basev0.NetworkInstance) *basev0.Configuration {
 	return &basev0.Configuration{
 		Origin:         s.Base.Unique(),
 		RuntimeContext: resources.RuntimeContextFromInstance(instance),
