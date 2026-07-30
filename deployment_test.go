@@ -69,13 +69,13 @@ func TestRestrictedPortableDeployment(t *testing.T) {
 					Destination: destination,
 					Profile:     builderv0.KubernetesOutputProfile_KUBERNETES_OUTPUT_PROFILE_RESTRICTED_PORTABLE_V1,
 					SecretReferences: map[string]*builderv0.KubernetesSecretKeyReference{
-						"MINIO_ROOT_USER": {
+						"CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER": {
 							Name: "s3-credentials",
-							Key:  "root-user",
+							Key:  "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER",
 						},
-						"MINIO_ROOT_PASSWORD": {
+						"CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD": {
 							Name: "s3-credentials",
-							Key:  "root-password",
+							Key:  "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD",
 						},
 					},
 				},
@@ -125,8 +125,8 @@ func TestRestrictedPortableDeployment(t *testing.T) {
 		"name: MINIO_ROOT_USER",
 		"name: MINIO_ROOT_PASSWORD",
 		"name: s3-credentials",
-		"key: root-user",
-		"key: root-password",
+		"key: CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER",
+		"key: CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD",
 	} {
 		if !strings.Contains(manifest, expected) {
 			t.Errorf("StatefulSet missing %q:\n%s", expected, manifest)
@@ -140,13 +140,13 @@ func TestRestrictedPortableDeployment(t *testing.T) {
 func TestRestrictedPortableDeploymentRequiresCredentialReferences(t *testing.T) {
 	validReferences := func() map[string]*builderv0.KubernetesSecretKeyReference {
 		return map[string]*builderv0.KubernetesSecretKeyReference{
-			"MINIO_ROOT_USER": {
+			"CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER": {
 				Name: "s3-credentials",
-				Key:  "root-user",
+				Key:  "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER",
 			},
-			"MINIO_ROOT_PASSWORD": {
+			"CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD": {
 				Name: "s3-credentials",
-				Key:  "root-password",
+				Key:  "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD",
 			},
 		}
 	}
@@ -158,31 +158,31 @@ func TestRestrictedPortableDeploymentRequiresCredentialReferences(t *testing.T) 
 		{
 			name:       "no references",
 			references: func() map[string]*builderv0.KubernetesSecretKeyReference { return nil },
-			wantError:  `requires secret reference "MINIO_ROOT_USER"`,
+			wantError:  `requires exactly two canonical MinIO credential references`,
 		},
 		{
 			name: "missing root user",
 			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
 				references := validReferences()
-				delete(references, "MINIO_ROOT_USER")
+				delete(references, "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER")
 				return references
 			},
-			wantError: `requires secret reference "MINIO_ROOT_USER"`,
+			wantError: `requires exactly two canonical MinIO credential references`,
 		},
 		{
 			name: "missing root password",
 			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
 				references := validReferences()
-				delete(references, "MINIO_ROOT_PASSWORD")
+				delete(references, "CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD")
 				return references
 			},
-			wantError: `requires secret reference "MINIO_ROOT_PASSWORD"`,
+			wantError: `requires exactly two canonical MinIO credential references`,
 		},
 		{
 			name: "optional root user",
 			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
 				references := validReferences()
-				references["MINIO_ROOT_USER"].Optional = true
+				references["CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_USER"].Optional = true
 				return references
 			},
 			wantError: `"MINIO_ROOT_USER" secret reference must not be optional`,
@@ -191,7 +191,7 @@ func TestRestrictedPortableDeploymentRequiresCredentialReferences(t *testing.T) 
 			name: "optional root password",
 			references: func() map[string]*builderv0.KubernetesSecretKeyReference {
 				references := validReferences()
-				references["MINIO_ROOT_PASSWORD"].Optional = true
+				references["CODEFLY__SERVICE_SECRET_CONFIGURATION__MODULE__S3__S3__MINIO_ROOT_PASSWORD"].Optional = true
 				return references
 			},
 			wantError: `"MINIO_ROOT_PASSWORD" secret reference must not be optional`,
