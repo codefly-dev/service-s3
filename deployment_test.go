@@ -49,7 +49,7 @@ func TestRestrictedPortableDeployment(t *testing.T) {
 		Api:     "tcp",
 	}
 	instance := resources.NewNetworkInstance("s3.example", 9000)
-	instance.Access = resources.NewPublicNetworkAccess()
+	instance.Access = resources.NewContainerNetworkAccess()
 	destination := t.TempDir()
 
 	response, err := builder.Deploy(ctx, &builderv0.DeploymentRequest{
@@ -225,7 +225,7 @@ func TestRestrictedPortableDeploymentRequiresCredentialReferences(t *testing.T) 
 				Api:     "tcp",
 			}
 			instance := resources.NewNetworkInstance("s3.example", 9000)
-			instance.Access = resources.NewPublicNetworkAccess()
+			instance.Access = resources.NewContainerNetworkAccess()
 			destination := t.TempDir()
 
 			response, err := builder.Deploy(context.Background(), &builderv0.DeploymentRequest{
@@ -312,7 +312,7 @@ func TestManifestGuardRender(t *testing.T) {
 		Api:     "tcp",
 	}
 	instance := resources.NewNetworkInstance("s3.example", 9000)
-	instance.Access = resources.NewPublicNetworkAccess()
+	instance.Access = resources.NewContainerNetworkAccess()
 
 	response, err := builder.Deploy(ctx, &builderv0.DeploymentRequest{
 		Environment: &basev0.Environment{Name: environment},
