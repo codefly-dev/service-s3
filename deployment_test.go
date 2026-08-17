@@ -107,12 +107,8 @@ func TestRestrictedPortableDeployment(t *testing.T) {
 		filepath.Join("base", "namespace.yaml"),
 		filepath.Join("overlays", "test", "secret.yaml"),
 	} {
-		content, readErr := os.ReadFile(filepath.Join(destination, relative))
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		if strings.TrimSpace(string(content)) != "" {
-			t.Fatalf("%s must be empty for restricted output:\n%s", relative, content)
+		if _, statErr := os.Stat(filepath.Join(destination, relative)); !os.IsNotExist(statErr) {
+			t.Fatalf("%s must not be rendered for restricted output", relative)
 		}
 	}
 	statefulSet, err := os.ReadFile(filepath.Join(destination, "base", "stateful-set.yaml"))
