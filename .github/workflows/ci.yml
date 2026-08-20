@@ -15,6 +15,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          # go.mod pins a `toolchain` newer than the `go` line, so setup-go
+          # installs the older Go and GOTOOLCHAIN downloads the toolchain into
+          # the module cache; setup-go's cache tar then collides on those
+          # read-only toolchain files (tar: .../cgo: File exists). Skip caching.
+          cache: false
       - name: Build
         run: go build ./...
       - name: Vet
