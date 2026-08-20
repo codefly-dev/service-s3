@@ -1,2 +1,3 @@
 # Built agent binary (rebuilt by `codefly agent build`).
 service-s3
+go.work*
