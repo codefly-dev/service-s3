@@ -2,6 +2,8 @@ module github.com/codefly-dev/service-s3
 
 go 1.26
 
+toolchain go1.26.6
+
 require (
 	github.com/codefly-dev/core v0.3.4
 	google.golang.org/grpc v1.83.0
