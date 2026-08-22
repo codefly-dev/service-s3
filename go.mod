@@ -3,7 +3,7 @@ module github.com/codefly-dev/service-s3
 go 1.27.0
 
 require (
-	github.com/codefly-dev/core v0.3.4
+	github.com/codefly-dev/core v0.3.6
 	google.golang.org/grpc v1.83.0
 	gopkg.in/yaml.v3 v3.0.1
 )
