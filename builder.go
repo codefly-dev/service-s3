@@ -108,7 +108,11 @@ func (s *Builder) Deploy(ctx context.Context, req *builderv0.DeploymentRequest) 
 		EnvironmentVariables: s.EnvironmentVariables,
 		Templates:            deploymentFS,
 		Prepare: func(ctx context.Context, deployment *services.KustomizeDeploymentContext) error {
-			restricted := services.IsRestrictedOutputProfile(deployment.Profile)
+			profile, err := services.ParseOutputProfile(deployment.Profile)
+			if err != nil {
+				return err
+			}
+			restricted := profile.Restricted()
 			if restricted {
 				references, err := minioRestrictedSecretReferences(deployment.Kubernetes.GetSecretReferences())
 				if err != nil {
@@ -189,7 +193,7 @@ func (s *Builder) CreateEndpoints(ctx context.Context) error {
 		return s.Wool.Wrapf(err, "cannot load tcp api")
 	}
 	endpoint := s.Base.BaseEndpoint(standards.TCP)
-	endpoint.Visibility = resources.VisibilityExternal
+	endpoint.Visibility = resources.VisibilityInternal
 	s.TcpEndpoint, err = resources.NewAPI(ctx, endpoint, resources.ToTCPAPI(tcp))
 	if err != nil {
 		return s.Wool.Wrapf(err, "cannot create tcp endpoint")
